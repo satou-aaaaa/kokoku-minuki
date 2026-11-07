@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { checkTransfer } from "./transfer-check.mjs";
+import { checkSwStall } from "./sw-check.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const results = [];
@@ -87,9 +88,10 @@ check("引き継ぎ：transfer.js をゲームの script より前に、この�
   check("感想フォームは名前・メールを聞かない", !/id: (name|email|mail)/.test(fy)); }
 check("README の URL のすぐ後ろに全角の字を続けない（Link check が URL の一部と読む）", !/https?:\/\/[\x21-\x7e]*[^\x00-\x7f]/.test(readFileSync(path.join(root, "README.md"), "utf8").replace(/\]\(https?:\/\/[^)\s]+\)/g, "").replace(/<https?:\/\/[^>\s]+>/g, "")));
 { const sw = readFileSync(path.join(root, "sw.js"), "utf8"), mf = JSON.parse(readFileSync(path.join(root, "manifest.webmanifest"), "utf8"));
+  { const st = await checkSwStall(sw); check("PWA：通信が止まっても4秒ほどで保存した画面に切り替わり、少しずつ届く受信は待ち、何も無ければ60秒で返す（shared-workflows template/qa/sw-check.mjs）", st.ok, JSON.stringify(st)); }
   const shell = JSON.parse(sw.match(/SHELL = (\[[^\]]+\])/)[1]);
   check("PWA：sw.js は画面のファイルを全部保存し（引き継ぎの transfer.js も）、取り直して入れ、外へ何も送らない", ["./index.html", "./gen.js", "./transfer.js", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png"].every((f) => shell.includes(f)) && /cache: "reload"/.test(sw) && !/https?:\/\//.test(sw.replace(/^\/\/.*$/gm, "")));
-  check("PWA：?付きの URL も同じ場所に保存・本文を受け取り終えてから返す・返事は30秒で必ず決める（2026-11-07 CodeRabbit）", /c\.put\(key, copy\)/.test(sw) && /url\.origin \+ url\.pathname/.test(sw) && /res\.blob\(\)/.test(sw) && /Response\.error\(\)\)\), 30000\)/.test(sw));
+  check("PWA：?付きの URL も同じ場所に保存し、自分の版からだけ探す（中身は shared-workflows template/sw.js。止まったときの動きは下の checkSwStall が見る）", /c\.put\(url\.pathname/.test(sw) && /caches\.open\(CACHE\)/.test(sw));
   check("PWA：manifest にアイコン2つと名前がある", mf.name === "広告みぬき" && mf.icons.length >= 2 && mf.start_url === "./"); }
 
 // ---- 3. ブラウザで遊ぶ ----
@@ -150,13 +152,18 @@ try {
   await p.click("#hint");
   const left = await p.evaluate(() => [...document.querySelectorAll(".pt,#okbtn")].filter((b) => !b.disabled).length);
   check("ヒント2はちがう所を消し、2つにしぼる・ヒントは2回まで", left === 2 && await p.locator("#hint:disabled").count() === 1, left);
+  await p.evaluate(() => { const c = __km.cur(); [...document.querySelectorAll(".pt,#okbtn")].find((b) => !b.disabled && +b.dataset.j !== c.P.ans).click(); });
+  await p.waitForTimeout(50);
+  { const n = await p.evaluate(() => [...document.querySelectorAll(".pt,#okbtn")].filter((b) => !b.disabled).length);
+    check("ヒント2のあとに残ったまちがいを押すと、正解だけが残る（消した所が戻らない。shared-workflows incidents/2026-11-07-hint-cut-comes-back.md）", n === 1, n); }
   await solve(p);
   check("ヒント2回は★1", (await p.getAttribute(".verdict .stars", "aria-label")) === "星1つ");
   await p.click("#next");
+  check("次の広告へ進むと、フォーカスが問い（#ask）に移る", await p.evaluate(() => document.activeElement && document.activeElement.id) === "ask");
   for (let i = 2; i < 5; i++) { await solve(p); await p.click("#next"); }
   await p.waitForTimeout(150);
   const s1 = await mem(p);
-  check("5枚で結果：今日の記録に1枚ごとのまちがい（1・2・0・0・0）", JSON.stringify(s1.days[TODAY]?.m) === "[1,2,0,0,0]");
+  check("5枚で結果：今日の記録に1枚ごとのまちがい（1・3・0・0・0）", JSON.stringify(s1.days[TODAY]?.m) === "[1,3,0,0,0]");
   const share = await p.textContent(".share");
   check("シェアの文に広告の中身・答えを出さない（印だけ）", /第\d+回/.test(share) && /🟢/.test(share) && !G.KINDS.some((k) => share.includes(k.name)) && !/円|No\.1|PR/.test(share), share);
   check("まちがいのある日は Ko-fi の一言を出さない", await p.locator(".kofi").count() === 0);
