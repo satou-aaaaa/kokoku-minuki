@@ -8,6 +8,7 @@ import { createRequire } from "node:module";
 import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { checkTransfer } from "./transfer-check.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -61,7 +62,10 @@ const G = createRequire(import.meta.url)(path.join(root, "gen.js"));
   check("今日の5枚（やさしい2・ふつう2・むずかしい1・種類は重ねない・問題なし1〜2枚）と上級（ふつう・むずかしいから3枚・今日と別の種類・問題なし0〜1枚）を3年分作れる", bad.length === 0, bad.slice(0, 5).join(","));
   check("2か月のうちに13種類が全部出る・前の日と同じ組の日が少ない", cover.size === 13 && sameAsPrev < 20, `${cover.size}種類・前の日と同じ ${sameAsPrev}日`);
   // 過去の日の広告を変えない：はじめの日の5枚を固定して見る（gen.js を変えて変わったら、PR に一言書いてからここを直す）
-  check("第1回（2026-11-07）の5枚が変わっていない", G.dailyTags("2026-11-07").join() === "stema|2026-11-07:d0|x,nijuu|2026-11-07:d1|o,kigen|2026-11-07:d2|x,muryo|2026-11-07:d3|x,konkyo|2026-11-07:d4|x" && G.make(G.dailyTags("2026-11-07")[0]).key.includes("ひなた通販") === G.make("stema|2026-11-07:d0|x").key.includes("ひなた通販"));
+  check("第1回（2026-11-07）の5枚が変わっていない", G.dailyTags("2026-11-07").join() === "stema|2026-11-07:d0|x,nijuu|2026-11-07:d1|o,kigen|2026-11-07:d2|x,muryo|2026-11-07:d3|x,konkyo|2026-11-07:d4|x");
+  // 中身（店・商品・押せる所の文・答え・メモ）まで固定値と比べる（2026-11-07 CodeRabbit）
+  const day1 = createHash("sha256").update(JSON.stringify(G.dailyTags("2026-11-07").map(G.make).map((p) => [p.kind, p.shop, p.prod, p.parts.map((x) => x.text), p.ans, p.memo || ""]))).digest("hex").slice(0, 16);
+  check("第1回（2026-11-07）の5枚の中身と答えが変わっていない", day1 === "4f868de38da16c18", day1);
 }
 
 // ---- 2. ファイルの中身 ----
@@ -85,15 +89,18 @@ check("README の URL のすぐ後ろに全角の字を続けない（Link check
 { const sw = readFileSync(path.join(root, "sw.js"), "utf8"), mf = JSON.parse(readFileSync(path.join(root, "manifest.webmanifest"), "utf8"));
   const shell = JSON.parse(sw.match(/SHELL = (\[[^\]]+\])/)[1]);
   check("PWA：sw.js は画面のファイルを全部保存し（引き継ぎの transfer.js も）、取り直して入れ、外へ何も送らない", ["./index.html", "./gen.js", "./transfer.js", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png"].every((f) => shell.includes(f)) && /cache: "reload"/.test(sw) && !/https?:\/\//.test(sw.replace(/^\/\/.*$/gm, "")));
+  check("PWA：?付きの URL も同じ場所に保存・本文を受け取り終えてから返す・返事は30秒で必ず決める（2026-11-07 CodeRabbit）", /c\.put\(key, copy\)/.test(sw) && /url\.origin \+ url\.pathname/.test(sw) && /res\.blob\(\)/.test(sw) && /Response\.error\(\)\)\), 30000\)/.test(sw));
   check("PWA：manifest にアイコン2つと名前がある", mf.name === "広告みぬき" && mf.icons.length >= 2 && mf.start_url === "./"); }
 
 // ---- 3. ブラウザで遊ぶ ----
 const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".png": "image/png", ".webmanifest": "application/manifest+json" };
 const server = createServer((req, res) => {
-  const p = decodeURIComponent(new URL(req.url, "http://x").pathname), f = path.join(root, p === "/" ? "index.html" : p);
-  if (!f.startsWith(root) || !existsSync(f)) { res.writeHead(404); return res.end(); }
+  let p; try { p = decodeURIComponent(new URL(req.url, "http://x").pathname); } catch (e) { res.writeHead(400); return res.end(); }
+  const f = path.join(root, p === "/" ? "index.html" : p), rel = path.relative(root, f);
+  if (!rel || rel.startsWith("..") || path.isAbsolute(rel) || !existsSync(f)) { res.writeHead(404); return res.end(); }
   res.writeHead(200, { "content-type": TYPES[path.extname(f)] || "application/octet-stream" }); res.end(readFileSync(f));
-}).listen(0);
+}).listen(0, "127.0.0.1"); // 外から読めないよう、自分の機械だけで待つ
+await new Promise((ok) => server.once("listening", ok));
 const url = `http://127.0.0.1:${server.address().port}/`;
 const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
 const errors = [];
@@ -193,10 +200,12 @@ try {
   {
     // 引き継ぎコードなどで数の所に文字が入っても、画面に HTML として出さない
     const q = await newPage(); await closeHow(q);
-    await q.evaluate(() => { const s = JSON.parse(localStorage.getItem("kokoku-v1")) || { v: 1 }; s.ebest = '<img id="xss" src=x>'; s.okc = "x"; s.dex = { no1img: '"><b id="xss2">' }; s.runs = { h: { list: "bad", res: [] }, p: { mode: "p", id: "y", date: "2026-11-07", list: ["constructor|1"], res: [] }, d: { mode: "d", id: "z", date: "x", list: ["no1img|1"], res: [] }, a3: { mode: "a", id: "a3", date: "2026-11-07", list: ["no1img|1", "nijuu|2"], res: [{ m: 0 }], cur: { i: 1, tag: "nijuu|2", wrong: "x", hints: 0 } } }; s.days = { "2026-11-07": { m: "x" }, bad: { m: [0] }, "2026-02-30": { m: [0] } }; localStorage.setItem("kokoku-v1", JSON.stringify(s)); });
+    await q.evaluate(() => { const s = JSON.parse(localStorage.getItem("kokoku-v1")) || { v: 1 }; s.ebest = '<img id="xss" src=x>'; s.okc = "x"; s.dex = { no1img: '"><b id="xss2">' }; s.runs = { h: { list: "bad", res: [] }, p: { mode: "p", id: "y", date: "2026-11-07", list: ["constructor|1"], res: [] }, d: { mode: "d", id: "z", date: "x", list: ["no1img|1"], res: [] }, "a:2026-11-07": { mode: "a", id: "a3", date: "2026-11-07", list: ["no1img|1", "nijuu|2"], res: [{ m: 0 }], cur: { i: 1, tag: "nijuu|2", wrong: "x", hints: 0 } } }; s.days = { "2026-11-07": { m: "x" }, bad: { m: [0] }, "2026-02-30": { m: [0] } }; localStorage.setItem("kokoku-v1", JSON.stringify(s)); });
+    await q.evaluate(() => { const s = JSON.parse(localStorage.getItem("kokoku-v1")); s.runs.zz = { mode: "zz", id: "q", date: "2026-11-07", list: ["no1img|1"], res: [] }; s.runs.e = { mode: "e", id: "old-e", date: "2026-11-07", list: ["no1img|1"], res: [] }; s.edone = { "old-e": 1 }; localStorage.setItem("kokoku-v1", JSON.stringify(s)); });
     await q.reload(); await q.waitForTimeout(250);
     const st = await q.evaluate(() => __km.load());
-    check("記録の形を直す：数の所の文字は0に・形のちがう途中経過と日ごとの記録は捨てる", st.ebest === 0 && st.okc === 0 && st.dex.no1img === 0 && !("h" in st.runs) && !("p" in st.runs) && !("d" in st.runs) && st.runs.a3 && st.runs.a3.cur === null && Object.keys(st.days).length === 0);
+    check("知らないモードの途中経過と、終えたとことんの回は戻さない（「もう一度とことん」で新しい回になる）", !("zz" in st.runs) && !("e" in st.runs) && st.edone["old-e"] === 1);
+    check("記録の形を直す：数の所の文字は0に・形のちがう途中経過と日ごとの記録は捨てる", st.ebest === 0 && st.okc === 0 && st.dex.no1img === 0 && !("h" in st.runs) && !("p" in st.runs) && !("d" in st.runs) && st.runs["a:2026-11-07"] && st.runs["a:2026-11-07"].cur === null && Object.keys(st.days).length === 0);
     check("記録の文字を HTML として出さない", await q.locator("#xss, #xss2").count() === 0);
     await q.context().close();
   }
@@ -261,6 +270,26 @@ try {
     await b.click("#hint");
     check("別のタブで使ったヒントの数を減らさない", (await mem(a)).runs.d.cur.hints === 2);
     await ctx.close();
+  }
+  // 古いタブでヒントなしに答えても、別のタブで先に使ったヒントを★に数える
+  {
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 800 } });
+    const a = await newPage(390, ctx); await closeHow(a); await a.click("#go-d");
+    const b = await ctx.newPage(); b.on("pageerror", (e) => errors.push(e.message)); await b.goto(url); await b.waitForTimeout(150); await b.click("#go-d");
+    await a.click("#hint");
+    await b.click(sel(await ansIdx(b))); await b.waitForTimeout(150);
+    const r = (await mem(b)).runs.d.res;
+    check("別のタブで先に使ったヒントも★に数える（ヒントなしの★3にしない）", r.length === 1 && r[0].m === 1 && (await b.getAttribute(".verdict .stars", "aria-label")) === "星2つ");
+    await ctx.close();
+  }
+  // 前の日に5枚とも答えたまま結果を見ていない回は、次の日を始めるときに記録する
+  {
+    const q = await newPage(); await closeHow(q);
+    const y = await q.evaluate(() => { const d = new Date(Date.parse(__km.todayKey() + "T00:00:00Z") - 864e5).toISOString().slice(0, 10); const s = __km.load(); const list = __km.G.dailyTags(d); s.runs.d = { mode: "d", date: d, list, res: list.map(() => ({ m: 0 })), cur: null, id: "yd" }; localStorage.setItem("kokoku-v1", JSON.stringify(s)); return d; });
+    await q.click("#go-d"); await q.waitForTimeout(150); // ホームを開いたままのタブで、別のタブが前の日の最後の1枚を終えたあとに今日を始める
+    const s = await mem(q);
+    check("前の日に終えたまま結果を見ていない回も、カレンダーに残る", JSON.stringify(s.days[y]?.m) === "[0,0,0,0,0]" && s.runs.d.date !== y);
+    await q.close();
   }
 
   // スマホ幅でもはみ出さない・押す所は44px以上（広告の中の押す所も）
