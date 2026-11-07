@@ -625,7 +625,7 @@ function paint() {
   const cut = cutOf();
   for (const j of choicesOf(cur.P)) { const b = btnOf(j); if (!b) continue; const ng = cur.wrong.includes(j) || cut.includes(j); b.classList.toggle("ng", ng); b.disabled = ng || cur.done; if (ng && !/（ちがう）$/.test(b.getAttribute("aria-label") || "")) b.setAttribute("aria-label", (j === -1 ? "問題なし" : b.getAttribute("aria-label")) + "（ちがう）"); }
   const h = $("hint"); if (h) h.disabled = cur.done || cur.hints >= 2;
-  $("hintbox").innerHTML = cur.hints && !cur.done ? `<div class="hint" role="status">💡 ${esc(cur.P.look)}${cur.hints >= 2 ? "<br>💡 ちがう所を消しました。のこりは2つです。" : ""}</div>` : "";
+  $("hintbox").innerHTML = cur.hints && !cur.done ? `<div class="hint" role="status">💡 ${esc(cur.P.look)}${cur.hints >= 2 ? `<br>💡 ちがう所を消しました。のこりは${choicesOf(cur.P).filter((x) => !cutOf().includes(x) && !cur.wrong.includes(x)).length}つです。` : ""}</div>` : "";
 }
 function hint() { if (cur.done || cur.hints >= 2) return; cur.hints++; keep(); paint(); }
 function choose(j) {
