@@ -647,11 +647,12 @@ function paint() {
   const h = $("hint"); if (h) h.disabled = cur.done || cur.hints >= 2;
   $("hintbox").innerHTML = cur.hints && !cur.done ? `<div class="hint" role="status">💡 ${esc(cur.P.look)}${cur.hints >= 2 ? `<br>💡 ちがう所を消しました。のこりは${choicesOf(cur.P).filter((x) => !cutOf().includes(x) && !cur.wrong.includes(x)).length}つです。` : ""}</div>` : "";
 }
-function hint() { if (cur.done || cur.hints >= 2) return; if (cur.step === 2) { if (cur.h2) return; cur.h2 = 1; cur.hints++; keep(); return paintWhy(); } cur.hints++; keep(); paint(); }
+function hint() { if (cur.done || cur.hints >= 2) return; if (cur.step === 2) { if (cur.h2 || !left2Of().length) return; cur.h2 = 1; cur.hints++; keep(); return paintWhy(); } cur.hints++; keep(); paint(); }
 // 2段目：見抜いたら「どの決まりに当たる？」を3つから選ぶ（消費者庁の分け方。game-dev.md「1問を深くする」）
 const RK = Object.keys(G.RULES);
 // 2段目のヒント：ちがう決まりを1つ消す（消すのは決まった1つ。まちがいの数で変えない）
-const cut2Of = () => (cur.h2 ? [RK.filter((x) => x !== cur.P.rule)[0]] : []);
+const left2Of = () => RK.filter((x) => x !== cur.P.rule && !cur.w2.includes(x));
+const cut2Of = () => (cur.h2 ? left2Of().slice(0, 1) : []);
 function askWhy() {
   const P = cur.P;
   for (const j of choicesOf(P)) { const b = btnOf(j); if (b) b.disabled = true; }
@@ -665,7 +666,7 @@ function askWhy() {
 function paintWhy() {
   const cut = cut2Of();
   document.querySelectorAll(".why button").forEach((b) => { const x = b.dataset.r, ng = cur.w2.includes(x) || cut.includes(x); b.classList.toggle("ng", ng); b.disabled = ng || cur.done; b.setAttribute("aria-label", G.RULES[x].name + (ng ? "（ちがう）" : "")); });
-  const h = $("hint"); if (h) h.disabled = cur.done || cur.hints >= 2 || !!cur.h2;
+  const h = $("hint"); if (h) h.disabled = cur.done || cur.hints >= 2 || !!cur.h2 || !left2Of().length;
   $("hintbox").innerHTML = cur.h2 && !cur.done ? `<div class="hint" role="status">💡 ちがう決まりを1つ消しました。</div>` : "";
 }
 function chooseWhy(x) {
