@@ -11,6 +11,7 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { checkTransfer } from "./transfer-check.mjs";
 import { checkSwStall } from "./sw-check.mjs";
+import { checkDepth } from "./depth-check.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const results = [];
@@ -79,7 +80,7 @@ check("乱数は sort の比較の中で引かない（ブラウザで引く回�
 check("一行の式の途中にコメント // を足さない（行の残りが消える。rosen-hitofude 2026-11-04）", !/;\s*\/\/[^\n]*;\s*\w/.test(gen.split("\n").filter((l) => !l.trim().startsWith("//")).join("\n")));
 check("画面にお笑いの言葉を入れない（本物っぽく）", !/お笑い|ギャグ|ツッコミ|なんでやねん|（うそ）/.test(html + gen));
 check("チケット・回数制限・🔒で開くモードを入れない（好きなだけ遊べる）", !/🎫|チケット|すると開く|🔒/.test(html));
-check("引き継ぎ：transfer.js をゲームの script より前に、このゲームの記録のキーだけで読む", /<script src="transfer\.js" data-game="kokoku-minuki" data-keys="kokoku-v1"><\/script>\s*<\/head>/.test(html) && html.indexOf('src="transfer.js"') < html.indexOf('src="gen.js"') && /data-hk/.test(html) && existsSync(path.join(root, "transfer.js")));
+check("引き継ぎ：transfer.js をゲームの script より前に、このゲームの記録のキー（記録と復習）だけで読む・depth.js も前に読む", /<script src="transfer\.js" data-game="kokoku-minuki" data-keys="kokoku-v1,kokoku-depth"><\/script>\s*<script src="depth\.js" data-game="kokoku-minuki" data-key="kokoku-depth"><\/script>\s*<\/head>/.test(html) && html.indexOf('src="transfer.js"') < html.indexOf('src="gen.js"') && /data-hk/.test(html) && existsSync(path.join(root, "transfer.js")));
 { const og = (k) => (html.match(new RegExp(`<meta (?:property|name)="${k}" content="([^"]+)"`)) || [])[1] || "";
   const png = readFileSync(path.join(root, "og.png"));
   check("SNS で貼ると絵と題が出る（OGP・1200×630・絶対URL）", og("og:title") && og("og:description") && og("og:image") === "https://satou-aaaaa.github.io/kokoku-minuki/og.png" && og("twitter:card") === "summary_large_image" && png.readUInt32BE(16) === 1200 && png.readUInt32BE(20) === 630); }
@@ -122,9 +123,12 @@ const sel = (j) => (j === -1 ? "#okbtn" : `.pt[data-j="${j}"]`);
 const ansIdx = (p) => p.evaluate(() => __km.cur().P.ans);
 const wrongIdx = (p) => p.evaluate(() => { const c = __km.cur(), all = [...c.P.parts.map((_, j) => j), -1]; return all.find((j) => j !== c.P.ans && !c.wrong.includes(j)); });
 const mem = (p) => p.evaluate(() => JSON.parse(localStorage.getItem("kokoku-v1") || "{}"));
+// 2段目（どの決まり？）が出たら、正しい決まりを選ぶ
+const why = async (p) => { await p.waitForSelector(".verdict, .why button"); if (await p.locator(".verdict").count()) return; await p.click(`.why button[data-r="${await p.evaluate(() => __km.cur().P.rule)}"]`); };
 async function solve(p, { wrong = 0 } = {}) {
   for (let i = 0; i < wrong; i++) await p.click(sel(await wrongIdx(p)));
   await p.click(sel(await ansIdx(p)));
+  await why(p);
   await p.waitForSelector(".verdict");
 }
 
@@ -299,6 +303,58 @@ try {
     await q.close();
   }
 
+  // 1問を深くする（shared-workflows routines/game-dev.md「1問を深くする」）：自信をかける・2段目「どの決まり？」・復習
+  {
+    const q = await newPage(); await closeHow(q);
+    const lie = G.KINDS.find((k) => !G.make(`${k.id}|d1|x`).ok);
+    const okTag = G.KINDS.map((k) => `${k.id}|d2|o`).find((t) => G.make(t).ok);
+    await q.evaluate((tags) => __km.save((s) => { s.runs.p = { mode: "p", date: __km.todayKey(), list: tags, res: [], cur: null, id: "dp" }; }), [`${lie.id}|d1|x`, `${lie.id}|d3|x`, okTag]);
+    await q.evaluate(() => { Depth.runStart(); __km.play("p"); });
+    const sb = await q.$eval("#dp-sure", (b) => [b.getBoundingClientRect().height, b.getAttribute("aria-pressed"), b.textContent]);
+    check("自信のボタン：高さ44px以上・はじめは押していない", sb[0] >= 44 && sb[1] === "false", sb.join(","));
+    await q.click("#dp-sure");
+    check("自信のボタンを押すと ✓ が出る（色だけで分けない）", (await q.getAttribute("#dp-sure", "aria-pressed")) === "true" && (await q.textContent("#dp-sure")).includes("✓"));
+    await q.click(sel(await wrongIdx(q)));
+    check("自信ありでまちがえると、知らせに「思いこみ」と出て、自信は変えられない", (await q.textContent("#msg")).includes("思いこみ") && await q.locator("#dp-sure:disabled").count() === 1);
+    await q.click(sel(await ansIdx(q)));
+    check("ウソを見抜くと、2段目「どの決まりに当たる？」が3つ出る（押せる所は44px以上）", await q.locator(".why button").count() === 3 && await q.locator(".verdict").count() === 0 && (await q.$$eval(".why button", (b) => b.every((x) => x.getBoundingClientRect().height >= 44))));
+    check("2段目の間は、広告の押せる所は押せない", await q.evaluate(() => [...document.querySelectorAll(".pt,#okbtn")].every((b) => b.disabled)));
+    await q.reload(); await q.waitForTimeout(150); await q.evaluate(() => __km.play("p"));
+    check("2段目の途中で閉じても、2段目から続く", await q.locator(".why button").count() === 3);
+    const wr = await q.evaluate(() => Object.keys(__km.G.RULES).find((x) => x !== __km.cur().P.rule));
+    await q.click(`.why button[data-r="${wr}"]`);
+    check("2段目でまちがえると ✕ ちがう（破線）・もう一度選べる", await q.locator(".why button.ng").count() === 1 && (await q.textContent("#msg")).includes("✕"));
+    await why(q); await q.waitForSelector(".verdict");
+    const m0 = await q.evaluate(() => __km.load().runs.p.res[0].m);
+    check("★は1段目と2段目のまちがいを合わせて数える（1＋1＝2）", m0 === 2, m0);
+    check("見抜いた画面に、自信ありでまちがえたことが出る", (await q.textContent(".verdict")).includes("自信ありでまちがえた"));
+    await q.click("#next");
+    await q.click("#hint"); await q.click("#hint");
+    await q.click(sel(await ansIdx(q)));
+    check("1段目でヒントを2回使ったら、2段目のヒントは押せない", await q.locator("#hint:disabled").count() === 1);
+    await why(q); await q.click("#next");
+    await q.click("#okbtn"); await q.waitForSelector(".verdict");
+    check("「問題なし」の広告は2段目を出さずに終わる", await q.locator(".why button").count() === 0);
+    await q.click("#next"); await q.waitForTimeout(150);
+    check("終えた直後の結果に「自信ありの当たり」が出る", (await q.textContent("#surestat")).includes("0/1"));
+    const dp = await q.evaluate(() => JSON.parse(localStorage.getItem("kokoku-depth") || "{}"));
+    check("まちがえた・ヒントを使った広告は復習に入る（問題なしの広告は入らない）", Object.keys(dp.rv || {}).length === 2, Object.keys(dp.rv || {}).join(","));
+    // 次の日：ホームに「復習」が出る・復習は今日の記録に入らない
+    await q.evaluate(() => { const d = JSON.parse(localStorage.getItem("kokoku-depth")); for (const k in d.rv) d.rv[k].due = "2026-01-01"; localStorage.setItem("kokoku-depth", JSON.stringify(d)); });
+    await q.goto(url); await q.waitForTimeout(150);
+    check("日の来た復習があると、ホームに「復習 2枚」", (await q.textContent("#go-r")).includes("復習 2枚"));
+    const before = await mem(q);
+    await q.click("#go-r");
+    check("復習の画面は「復習」と出る", (await q.textContent("header")).includes("復習"));
+    for (let i = 0; i < 2; i++) { await solve(q); await q.click("#next"); }
+    await q.waitForTimeout(150);
+    const after = await mem(q), dp2 = await q.evaluate(() => JSON.parse(localStorage.getItem("kokoku-depth")));
+    check("復習を終えると結果は「復習」・今日の記録・連続は増えない", (await q.textContent("h1")).includes("復習") && JSON.stringify(after.days) === JSON.stringify(before.days) && Object.keys(after.runs).every((m) => m !== "r" || after.runs.r === null));
+    check("復習で一度で正解すると、次は3日後へ進む", Object.values(dp2.rv).every((x) => x.s === 1 && x.due > TODAY), JSON.stringify(dp2.rv).slice(0, 200));
+    await q.goto(url); await q.waitForTimeout(150);
+    check("復習を終えたら、ホームの「復習」は消える", await q.locator("#go-r").count() === 0);
+    await q.context().close();
+  }
   // スマホ幅でもはみ出さない・押す所は44px以上（広告の中の押す所も）
   {
     const bad = [], small = [];
@@ -345,7 +401,8 @@ try {
     const q = await newPage(); await closeHow(q);
     await q.focus("#go-d"); await q.keyboard.press("Enter"); await q.waitForTimeout(100);
     await q.focus(sel(await ansIdx(q))); await q.keyboard.press("Enter"); await q.waitForTimeout(100);
-    check("キーボードだけで選んで答えられる", await q.locator(".verdict").count() === 1);
+    if (await q.locator(".why button").count()) { await q.focus(`.why button[data-r="${await q.evaluate(() => __km.cur().P.rule)}"]`); await q.keyboard.press("Enter"); await q.waitForTimeout(100); }
+    check("キーボードだけで選んで答えられる（2段目の「どの決まり？」も）", await q.locator(".verdict").count() === 1);
     await q.context().close();
   }
 } catch (e) { check("ブラウザでの検査が最後まで動く", false, e.stack.split("\n").slice(0, 3).join(" ")); }
@@ -357,6 +414,9 @@ try {
   check("とことんの並びを300回作って、1回の中で同じ広告が出ない（足した分とも）・はじめはやさしい", r[0] === 0, r.join(","));
   await q.context().close();
 } catch (e) { check("とことんの並びの検査が最後まで動く", false, e.message); }
+
+// 深さの部品（shared-workflows template/qa/depth-check.mjs）
+{ const e = await checkDepth(readFileSync(path.join(root, "depth.js"), "utf8")); check("depth.js（自信をかける・復習）の動き", e.length === 0, e.join(" / ")); }
 
 // 引き継ぎコード（shared-workflows template/qa/transfer-check.mjs）
 try {
