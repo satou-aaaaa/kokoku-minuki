@@ -358,6 +358,7 @@ const SITE = "https://satou-aaaaa.github.io/kokoku-minuki/";
 const FEEDBACK = "https://github.com/satou-aaaaa/kokoku-minuki/issues/new?template=feedback.yml";
 const KEY = "kokoku-v1", EPOCH = "2026-11-07";
 const G = window.KOKOKU, LV = G.LV;
+Depth.setValid((t) => { if (!Object.prototype.hasOwnProperty.call(G.BY, String(t).split("|")[0])) return false; G.make(t); return true; }); // 作り直せない鍵（引き継ぎ・消えた種類）は復習に数えない
 
 // ---- 日付（日本時間。だれでも同じ5枚）----
 const jstNow = () => new Date(Date.now() + 9 * 3600e3);
@@ -451,7 +452,7 @@ function tidy(s) {
     const r = s.runs[m]; if (r === null) continue;
     if (!r || typeof r !== "object" || !MODES.includes(r.mode) || (r.mode === "a" ? m !== "a:" + r.date : m !== r.mode) || (r.mode === "e" && s.edone[r.id])) { delete s.runs[m]; continue; } // 知らないモード・終えたとことんは戻さない
     if (typeof r !== "object" || !okDate(r.date) || !Array.isArray(r.list) || !r.list.every(okTag) || !Array.isArray(r.res) || !r.res.every((x) => x && typeof x === "object" && Number.isInteger(x.m) && x.m >= 0)) { delete s.runs[m]; continue; }
-    if (r.cur != null && (typeof r.cur !== "object" || !Array.isArray(r.cur.wrong))) r.cur = null; else if (r.cur) { r.cur.hints = num(r.cur.hints); r.cur.wrong = r.cur.wrong.filter((w) => Number.isInteger(w)); r.cur.step = r.cur.step === 2 ? 2 : 1; r.cur.w2 = Array.isArray(r.cur.w2) ? r.cur.w2.filter((x) => Object.prototype.hasOwnProperty.call(G.RULES, x)) : []; r.cur.jd = r.cur.jd && typeof r.cur.jd === "object" && r.cur.jd.sure === true ? { sure: true, ok: r.cur.jd.ok === true, text: "" } : null; }
+    if (r.cur != null && (typeof r.cur !== "object" || !Array.isArray(r.cur.wrong))) r.cur = null; else if (r.cur) { r.cur.hints = num(r.cur.hints); r.cur.wrong = r.cur.wrong.filter((w) => Number.isInteger(w)); r.cur.step = r.cur.step === 2 ? 2 : 1; r.cur.w2 = Array.isArray(r.cur.w2) ? r.cur.w2.filter((x) => Object.prototype.hasOwnProperty.call(G.RULES, x)) : []; r.cur.jd = r.cur.jd && typeof r.cur.jd === "object" && r.cur.jd.sure === true ? { sure: true, ok: r.cur.jd.ok === true, text: "" } : null; r.cur.h2 = r.cur.h2 === 1 && r.cur.step === 2 ? 1 : 0; }
     r.ds = r.ds && typeof r.ds === "object" ? { n: num(r.ds.n), ok: Math.min(num(r.ds.ok), num(r.ds.n)) } : { n: 0, ok: 0 }; // この回の「自信あり」の数と当たり
   }
   return s;
@@ -594,7 +595,7 @@ function startRun(mode, opt) {
 let cur = null;
 const same = (r) => r && cur && r.date === cur.date && r.id === cur.id && r.res.length === cur.i && r.list[cur.i] === cur.tag; // 保存した進み具合が、この画面と同じ広告か
 // 途中の保存：別のタブで使ったヒント・まちがいも減らさない（多いほう・合わせたほうを残す）
-function keep() { save((s) => { const r = s.runs[MODE]; if (!same(r)) return; const was = r.cur && r.cur.i === cur.i && r.cur.tag === cur.tag ? r.cur : { wrong: [], hints: 0 }; cur.hints = Math.max(cur.hints, was.hints || 0); for (const w of was.wrong || []) if (!cur.wrong.includes(w)) cur.wrong.push(w); cur.step = Math.max(cur.step, was.step || 1); for (const w of was.w2 || []) if (!cur.w2.includes(w)) cur.w2.push(w); if (!cur.jd && was.jd) cur.jd = was.jd; r.cur = { i: cur.i, tag: cur.tag, wrong: cur.wrong.slice(), hints: cur.hints, step: cur.step, w2: cur.w2.slice(), jd: cur.jd }; }); }
+function keep() { save((s) => { const r = s.runs[MODE]; if (!same(r)) return; const was = r.cur && r.cur.i === cur.i && r.cur.tag === cur.tag ? r.cur : { wrong: [], hints: 0 }; cur.hints = Math.max(cur.hints, was.hints || 0); for (const w of was.wrong || []) if (!cur.wrong.includes(w)) cur.wrong.push(w); cur.step = Math.max(cur.step, was.step || 1); for (const w of was.w2 || []) if (!cur.w2.includes(w)) cur.w2.push(w); if (!cur.jd && was.jd) cur.jd = was.jd; if (was.h2) cur.h2 = 1; r.cur = { i: cur.i, tag: cur.tag, wrong: cur.wrong.slice(), hints: cur.hints, step: cur.step, w2: cur.w2.slice(), jd: cur.jd, h2: cur.h2 ? 1 : 0 }; }); }
 const missOf = () => cur.wrong.length + cur.hints + cur.w2.length; // 2段目（なぜ？）のまちがいも数える
 const choicesOf = (P) => [...P.parts.map((_, j) => j), -1];
 function play() {
@@ -606,7 +607,7 @@ function play() {
   if (run.mode === "a" && s.days[run.date]) { save((s2) => { s2.runs[MODE] = null; }); toast("この日は別の画面で遊び終えています"); return home(); }
   const tag = run.list[i], P = G.make(tag), hard = run.mode === "h";
   const saved = run.cur && run.cur.i === i && run.cur.tag === tag ? run.cur : { wrong: [], hints: 0 };
-  cur = { i, date: run.date, id: run.id, tag, P, wrong: (saved.wrong || []).filter((w) => w !== P.ans && choicesOf(P).includes(w)), hints: saved.hints || 0, step: P.ok ? 1 : saved.step === 2 ? 2 : 1, w2: (saved.w2 || []).filter((x) => x !== P.rule && G.RULES[x]), jd: saved.jd || null, done: false };
+  cur = { i, date: run.date, id: run.id, tag, P, wrong: (saved.wrong || []).filter((w) => w !== P.ans && choicesOf(P).includes(w)), hints: saved.hints || 0, step: P.ok ? 1 : saved.step === 2 ? 2 : 1, w2: (saved.w2 || []).filter((x) => x !== P.rule && G.RULES[x]), jd: saved.jd || null, h2: !P.ok && saved.step === 2 && saved.h2 ? 1 : 0, done: false };
   const label = run.mode === "d" ? LV[P.lv] : run.mode === "a" ? `あとから・${LV[P.lv]}` : hard ? "上級" : run.mode === "r" ? `復習・${LV[P.lv]}` : run.mode === "e" ? `とことん・${LV[P.lv]}` : `練習・${LV[P.lv]}`;
   const showTip = (run.mode === "d" || run.mode === "a") && i === 0, tip = tipOf(run.date), clean = run.res.filter((x) => x.m === 0).length;
   app.innerHTML = `

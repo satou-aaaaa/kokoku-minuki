@@ -324,9 +324,13 @@ try {
     const wr = await q.evaluate(() => Object.keys(__km.G.RULES).find((x) => x !== __km.cur().P.rule));
     await q.click(`.why button[data-r="${wr}"]`);
     check("2段目でまちがえると ✕ ちがう（破線）・もう一度選べる", await q.locator(".why button.ng").count() === 1 && (await q.textContent("#msg")).includes("✕"));
+    await q.click("#hint");
+    const ng1 = await q.locator(".why button:disabled").count();
+    await q.reload(); await q.waitForTimeout(150); await q.evaluate(() => __km.play("p"));
+    check("2段目のヒントで消した決まりは、閉じて開き直しても消えたまま（ヒントも押せないまま）", await q.locator(".why button:disabled").count() === ng1 && ng1 >= 1 && await q.locator("#hint:disabled").count() === 1 && (await q.textContent("#hintbox")).includes("消しました"));
     await why(q); await q.waitForSelector(".verdict");
     const m0 = await q.evaluate(() => __km.load().runs.p.res[0].m);
-    check("★は1段目と2段目のまちがいを合わせて数える（1＋1＝2）", m0 === 2, m0);
+    check("★は1段目と2段目のまちがい・ヒントを合わせて数える（1＋1＋1＝3）", m0 === 3, m0);
     check("見抜いた画面に、自信ありでまちがえたことが出る", (await q.textContent(".verdict")).includes("自信ありでまちがえた"));
     await q.click("#next");
     await q.click("#hint"); await q.click("#hint");
@@ -353,6 +357,10 @@ try {
     check("復習で一度で正解すると、次は3日後へ進む", Object.values(dp2.rv).every((x) => x.s === 1 && x.due > TODAY), JSON.stringify(dp2.rv).slice(0, 200));
     await q.goto(url); await q.waitForTimeout(150);
     check("復習を終えたら、ホームの「復習」は消える", await q.locator("#go-r").count() === 0);
+    // 引き継ぎなどで作り直せない鍵が入っても、ホームは止まらず数えない（2026-11-11 CodeRabbit）
+    await q.evaluate(() => { const d = JSON.parse(localStorage.getItem("kokoku-depth")); d.rv["nai|1|x"] = { s: 0, due: "2026-01-01", t: 1 }; d.rv["constructor|x"] = { s: 0, due: "2026-01-01", t: 2 }; localStorage.setItem("kokoku-depth", JSON.stringify(d)); });
+    await q.goto(url); await q.waitForTimeout(150);
+    check("作り直せない鍵（無い種類・constructor）は復習に数えず、ホームも出る", await q.locator("#go-d").count() === 1 && await q.locator("#go-r").count() === 0);
     await q.context().close();
   }
   // スマホ幅でもはみ出さない・押す所は44px以上（広告の中の押す所も）
