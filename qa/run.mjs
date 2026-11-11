@@ -363,6 +363,25 @@ try {
     await q.evaluate(() => { const d = JSON.parse(localStorage.getItem("kokoku-depth")); d.rv["nai|1|x"] = { s: 0, due: "2026-01-01", t: 1 }; d.rv["constructor|x"] = { s: 0, due: "2026-01-01", t: 2 }; localStorage.setItem("kokoku-depth", JSON.stringify(d)); });
     await q.goto(url); await q.waitForTimeout(150);
     check("作り直せない鍵（無い種類・constructor）は復習に数えず、ホームも出る", await q.locator("#go-d").count() === 1 && await q.locator("#go-r").count() === 0);
+    // 別のタブで2段目へ進んでいたら、この画面も2段目になる・別のタブで先に進んだ古い画面は復習の段を戻さない（2026-11-11 CodeRabbit）
+    { const tq = `${lie.id}|dq1|x`;
+      await q.goto(url); await q.waitForTimeout(150);
+      await q.evaluate((t) => { __km.save((s) => { s.runs.p = { mode: "p", date: __km.todayKey(), list: [t], res: [], cur: null, id: "dq" }; }); __km.play("p"); }, tq);
+      await q.evaluate((t) => __km.save((s) => { s.runs.p.cur = { i: 0, tag: t, wrong: [], hints: 0, step: 2, w2: [] }; }), tq);
+      await q.click("#hint"); await q.waitForTimeout(100);
+      check("別のタブで2段目へ進んでいたら、この画面も2段目になる", await q.locator(".why button").count() === 3 && await q.evaluate(() => __km.cur().step) === 2);
+      await q.evaluate((t) => { __km.save((s) => { s.runs.p.res.push({ m: 0 }); s.runs.p.cur = null; }); const d = JSON.parse(localStorage.getItem("kokoku-depth")); d.rv[t] = { s: 2, due: "2099-01-01", t: 9 }; localStorage.setItem("kokoku-depth", JSON.stringify(d)); }, tq);
+      await q.click("#hint"); await q.waitForTimeout(50);
+      check("別のタブで先に進んだ古い画面でヒントを押しても、復習の段は戻らない", await q.evaluate((t) => JSON.parse(localStorage.getItem("kokoku-depth")).rv[t].s, tq) === 2);
+    }
+    // 復習の途中でヒント・まちがいがあって日の来た問題が0になっても、ホームの「復習の続きから」で戻れる（2026-11-11 CodeRabbit）
+    { const rk = Object.keys(dp2.rv)[0];
+      await q.evaluate((k) => { const d = JSON.parse(localStorage.getItem("kokoku-depth")); d.rv = { [k]: { s: 0, due: "2026-01-01", t: 3 } }; localStorage.setItem("kokoku-depth", JSON.stringify(d)); }, rk);
+      await q.goto(url); await q.waitForTimeout(150); await q.click("#go-r"); await q.click("#hint");
+      await q.goto(url); await q.waitForTimeout(150);
+      check("復習の途中でヒントを使って日の来た問題が0になっても、ホームの「復習の続きから」で戻れる", ((await q.locator("#go-r").count()) ? await q.textContent("#go-r") : "").includes("続きから"));
+      if (await q.locator("#go-r").count()) { await q.click("#go-r"); check("復習の続きは同じ問題・使ったヒントはそのまま", await q.evaluate(() => __km.cur().tag) === rk && await q.evaluate(() => __km.cur().hints) === 1); }
+    }
     await q.context().close();
   }
   // スマホ幅でもはみ出さない・押す所は44px以上（広告の中の押す所も）
