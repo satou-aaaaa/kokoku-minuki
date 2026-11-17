@@ -208,6 +208,18 @@ try {
   check("とことんは並びを使い切る前に足して続く（足した分とも重ならない）", el.length > 46 && new Set(el.map(G.keyOf)).size === el.length, el.length);
   await p.click("#quit"); await p.waitForTimeout(150);
   check("「ここで降りる」で終わり、自己ベストは一度で見抜いた数（2枚）", (await mem(p)).ebest === 2 && (await p.textContent("#ebest")).includes("一度で見抜いた 2枚") && !(await mem(p)).runs.e);
+  { const q = await newPage(); await q.keyboard.press("Escape"); await q.waitForTimeout(100); await q.reload(); await q.waitForTimeout(150);
+    check("初めて開いて遊び方を Esc で閉じると、開き直しても遊び方が出ない", await q.locator("#howto[open]").count() === 0);
+    let again = 0; for (let i = 0; i < 10; i++) { await q.evaluate(() => localStorage.clear()); await q.reload(); await q.waitForTimeout(150); await q.keyboard.press("Escape"); await q.reload(); await q.waitForTimeout(150); again += await q.locator("#howto[open]").count(); }
+    check("遊び方を Esc で閉じてすぐ読み直しても出ない（10回）", again === 0, again);
+    await q.evaluate(() => localStorage.clear()); await q.reload(); await q.waitForTimeout(150);
+    check("「わかった」を押したその場で「見た」が残る", await q.locator("#howto-ok").evaluate((b) => { b.click(); return JSON.parse(localStorage.getItem("kokoku-v1") || "{}").tut === true; })); await q.context().close(); }
+  { const q = await newPage(); await closeHow(q); await q.click("#go-e"); await solve(q); await q.click("#quit"); await q.waitForTimeout(150);
+    check("とことんで正解した直後（次へを押す前）でも「ここで降りる」で終わり、その1枚が数に入る", await q.locator("#eres").count() === 1 && (await q.textContent("#eres")).includes("1枚") && (await mem(q)).ebest === 1 && !(await mem(q)).runs.e); await q.context().close(); }
+  { const c = await browser.newContext({ viewport: { width: 390, height: 800 } }); await c.addInitScript(() => { window.__origSetItem = Storage.prototype.setItem; Storage.prototype.setItem = function () { throw new Error("full"); }; }); const q = await newPage(390, c); await closeHow(q); await q.click("#go-e"); await solve(q); await q.waitForTimeout(2000);
+    const warn = await q.locator("#savewarn").count(), txt = warn ? await q.textContent("#savewarn") : "";
+    await q.evaluate(() => { Storage.prototype.setItem = window.__origSetItem; }); for (let i = 0; i < 2; i++) { await q.click("#next"); await solve(q); } await q.waitForTimeout(100);
+    check("保存できないと帯 #savewarn がちょうど1つ出て2秒たっても残り、保存できるようになって次の広告を解くと消える（復習の控え depth.js も書けてから）", warn === 1 && txt.includes("保存できませんでした") && await q.locator("#savewarn").count() === 0, `帯 ${warn}`); await c.close(); }
   {
     // 引き継ぎコードなどで数の所に文字が入っても、画面に HTML として出さない
     const q = await newPage(); await closeHow(q);
@@ -288,7 +300,7 @@ try {
     const a = await newPage(390, ctx); await closeHow(a); await a.click("#go-d");
     const b = await ctx.newPage(); b.on("pageerror", (e) => errors.push(e.message)); await b.goto(url); await b.waitForTimeout(150); await b.click("#go-d");
     await a.click("#hint");
-    await b.click(sel(await ansIdx(b))); await b.waitForTimeout(150);
+    await b.click(sel(await ansIdx(b))); await why(b); await b.waitForTimeout(150);
     const r = (await mem(b)).runs.d.res;
     check("別のタブで先に使ったヒントも★に数える（ヒントなしの★3にしない）", r.length === 1 && r[0].m === 1 && (await b.getAttribute(".verdict .stars", "aria-label")) === "星2つ");
     await ctx.close();
