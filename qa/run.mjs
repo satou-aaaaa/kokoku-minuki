@@ -16,6 +16,7 @@ import { checkDepth } from "./depth-check.mjs";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const results = [];
 const check = (name, ok, detail = "") => results.push({ name, ok: !!ok, detail: String(detail).slice(0, 400) });
+const firstClose = async (q) => { if (await q.locator("#howto[open]").count()) await q.click("#howto-ok"); if (await q.locator("#core-coach").count()) { await q.evaluate(() => Core.coach.leave()); await q.waitForTimeout(100); } }; // はじめての練習の吹き出しをやめてホームへ（sync-template の migrateFirstQa が足した）
 const G = createRequire(import.meta.url)(path.join(root, "gen.js"));
 
 // ---- 1. 広告の作り方（ブラウザを使わない）----
@@ -118,7 +119,7 @@ async function newPage(w = 390, ctx) {
   await p.goto(url); await p.waitForTimeout(200);
   return p;
 }
-const closeHow = async (p) => { if (await p.locator("#howto[open]").count()) await p.click("#howto-ok"); };
+const closeHow = async (p) => { await firstClose(p); };
 const sel = (j) => (j === -1 ? "#okbtn" : `.pt[data-j="${j}"]`);
 const ansIdx = (p) => p.evaluate(() => __km.cur().P.ans);
 const wrongIdx = (p) => p.evaluate(() => { const c = __km.cur(), all = [...c.P.parts.map((_, j) => j), -1]; return all.find((j) => j !== c.P.ans && !c.wrong.includes(j)); });
@@ -134,8 +135,8 @@ async function solve(p, { wrong = 0 } = {}) {
 
 try {
   const p = await newPage();
-  check("はじめて開くと遊び方が出る", await p.locator("#howto[open]").count() === 1);
-  await p.click("#howto-ok");
+  check("はじめて開くと遊び方が出る", await p.locator("#core-coach").count() === 1);
+  await firstClose(p);
   check("ホームに今日のコツが出る・上級・とことん・練習ははじめから押せる", (await p.textContent("#tip")).includes("今日のコツ") && await p.locator("#go-h:not([disabled])").count() === 1 && await p.locator("#go-e").count() === 1 && await p.locator("#go-p").count() === 1);
 
   // 今日の5枚：1枚目はまちがえる、2枚目はヒント2回、ほかはそのまま
@@ -463,7 +464,7 @@ try {
 // 引き継ぎコード（shared-workflows template/qa/transfer-check.mjs）
 try {
   const sample = { "kokoku-v1": JSON.stringify({ v: 1, tut: true, days: { "2026-11-07": { m: [0, 1, 0, 0, 2], k: ["stema", "nijuu", "kigen", "muryo", "konkyo"] } }, hdays: {}, adays: {}, dex: { stema: 1, nijuu: 1, kigen: 1, muryo: 1, konkyo: 1 }, okc: 1, runs: {}, kofi: {}, ach: {}, ebest: 7, t: 1 }) };
-  await checkTransfer({ browser, url, game: "kokoku-minuki", sample, check, open: async (pg) => { if (await pg.locator("#howto[open]").count()) await pg.click("#howto-ok"); } });
+  await checkTransfer({ browser, url, game: "kokoku-minuki", sample, check, open: async (pg) => { await firstClose(pg); } });
 } catch (e) { check("引き継ぎの検査が最後まで動く", false, e.message.split("\n")[0]); }
 { // 知らせ（.toast）は下のボタンを塞がない（shared-workflows incidents/2026-11-17-known-game-bugs-spread.md）
   const pt = await browser.newPage(); await pt.goto(url);
